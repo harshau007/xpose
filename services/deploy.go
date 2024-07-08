@@ -13,6 +13,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	// "github.com/spf13/viper"
+	"gopkg.in/yaml.v2"
 )
 
 func DeployDocker(image, port, projectName, projectDir string) error {
@@ -33,16 +36,69 @@ func DeployDocker(image, port, projectName, projectDir string) error {
 	return nil
 }
 
+// func SaveProjectInfo(name, dir, containerID, port, deployType, source string) {
+// 	url, err := ExtractBoreURL("stdoutfile")
+// 	if err != nil {
+// 		fmt.Println(err)
+// 	}
+// 	info := fmt.Sprintf("Name: %s\nContainer ID: %s\nPort: %s\nType: %s\nSource: %s\nPublic URL: %s\n",
+// 		name, containerID, port, deployType, source, url)
+// 	err = os.WriteFile(filepath.Join(dir, "project_info.txt"), []byte(info), 0644)
+// 	if err != nil {
+// 		fmt.Printf("Error saving project info: %v\n", err)
+// 	}
+// 	stdFiles := []string{"stdoutfile", "stderrfile"}
+// 	for _, file := range stdFiles {
+// 		err = os.Remove(file)
+// 		if err != nil {
+// 			log.Fatal(err)
+// 		}
+// 	}
+// }
+
 func SaveProjectInfo(name, dir, containerID, port, deployType, source string) {
 	url, err := ExtractBoreURL("stdoutfile")
 	if err != nil {
 		fmt.Println(err)
 	}
-	info := fmt.Sprintf("Name: %s\nContainer ID: %s\nPort: %s\nType: %s\nSource: %s\nPublic URL: %s\n",
-		name, containerID, port, deployType, source, url)
-	err = os.WriteFile(filepath.Join(dir, "project_info.txt"), []byte(info), 0644)
+
+	// Create a map to hold the project info
+	projectInfo := map[string]string{
+		"name":         name,
+		"container_id": containerID,
+		"port":         port,
+		"type":         deployType,
+		"source":       source,
+		"public_url":   url,
+	}
+
+	// Marshal the map into YAML
+	yamlData, err := yaml.Marshal(&projectInfo)
+	if err != nil {
+		fmt.Printf("Error marshaling config: %v\n", err)
+		return
+	}
+
+	// Set the file name and path
+	fileName := "projects_info.yaml"
+	filePath := filepath.Join(dir, fileName)
+
+	// Write the YAML data to file
+	err = os.WriteFile(filePath, yamlData, 0644)
 	if err != nil {
 		fmt.Printf("Error saving project info: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Project info saved successfully to %s\n", filePath)
+
+	// Remove temporary files
+	stdFiles := []string{"stdoutfile", "stderrfile"}
+	for _, file := range stdFiles {
+		err = os.Remove(file)
+		if err != nil {
+			log.Printf("Error removing file %s: %v\n", file, err)
+		}
 	}
 }
 

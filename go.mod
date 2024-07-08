@@ -5,6 +5,7 @@ go 1.22.4
 require (
 	github.com/jkuri/bore v0.4.2
 	github.com/spf13/cobra v1.8.1
+	gopkg.in/yaml.v2 v2.2.4
 )
 
 require (
