@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,9 +27,9 @@ func DeployDocker(image, port, projectName, projectDir string) error {
 		return err
 	}
 	containerID := strings.TrimSpace(string(output))
-	err = Tunnel(port)
+	pid, err := Serve(port)
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, port, "docker", image)
+	SaveProjectInfo(projectName, projectDir, containerID, port, "docker", image, strconv.Itoa(pid+1))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,34 +57,57 @@ func DeployDocker(image, port, projectName, projectDir string) error {
 // 	}
 // }
 
-func SaveProjectInfo(name, dir, containerID, port, deployType, source string) {
+func SaveProjectInfo(name, dir, containerID, port, deployType, source, pid string) {
 	url, err := ExtractBoreURL("stdoutfile")
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	// Create a map to hold the project info
-	projectInfo := map[string]string{
+	// Create a map to hold the new project info
+	newProjectInfo := map[string]string{
 		"name":         name,
 		"container_id": containerID,
 		"port":         port,
 		"type":         deployType,
 		"source":       source,
 		"public_url":   url,
-	}
-
-	// Marshal the map into YAML
-	yamlData, err := yaml.Marshal(&projectInfo)
-	if err != nil {
-		fmt.Printf("Error marshaling config: %v\n", err)
-		return
+		"pid":          pid,
 	}
 
 	// Set the file name and path
 	fileName := "projects_info.yaml"
 	filePath := filepath.Join(dir, fileName)
 
-	// Write the YAML data to file
+	var projectInfos []map[string]string
+
+	// Checking if the file exists
+	if _, err := os.Stat(filePath); err == nil {
+		// Reading existing YAML file
+		existingData, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Printf("Error reading existing project info: %v\n", err)
+			return
+		}
+
+		// Unmarshaling existing YAML data into a slice of maps
+		err = yaml.Unmarshal(existingData, &projectInfos)
+		if err != nil {
+			fmt.Printf("Error unmarshaling existing project info: %v\n", err)
+			return
+		}
+	}
+
+	// Appending new project info to the slice
+	projectInfos = append(projectInfos, newProjectInfo)
+
+	// Marshaling updated slice into YAML
+	yamlData, err := yaml.Marshal(&projectInfos)
+	if err != nil {
+		fmt.Printf("Error marshaling config: %v\n", err)
+		return
+	}
+
+	// Writing updated YAML data to the file
 	err = os.WriteFile(filePath, yamlData, 0644)
 	if err != nil {
 		fmt.Printf("Error saving project info: %v\n", err)
@@ -91,15 +115,6 @@ func SaveProjectInfo(name, dir, containerID, port, deployType, source string) {
 	}
 
 	fmt.Printf("Project info saved successfully to %s\n", filePath)
-
-	// Remove temporary files
-	stdFiles := []string{"stdoutfile", "stderrfile"}
-	for _, file := range stdFiles {
-		err = os.Remove(file)
-		if err != nil {
-			log.Printf("Error removing file %s: %v\n", file, err)
-		}
-	}
 }
 
 func ExtractBoreURL(filename string) (string, error) {
@@ -182,12 +197,12 @@ func DeployGitHub(repo, port, projectDir string) error {
 		return err
 	}
 	containerID := strings.TrimSpace(string(output))
-	err = Tunnel(port)
+	pid, err := Serve(port)
 	if err != nil {
 		log.Fatal(err)
 	}
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, port, "github", repo)
+	SaveProjectInfo(projectName, projectDir, containerID, port, "github", repo, strconv.Itoa(pid+1))
 	fmt.Printf("Deployment successful. Container ID: %s\n", containerID)
 	return nil
 }

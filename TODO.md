@@ -1,0 +1,4 @@
+- [x] Add PID to YAML file (Used Workaround to get correct PID)
+- [ ] Handle port conflicting (use external port with increment if already in use and internal port which user has given as input)
+- [ ] Use YAML file as DB
+- [ ] Add Deleting with also process kill of the bore command
