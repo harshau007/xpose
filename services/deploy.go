@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -13,23 +14,30 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	// "github.com/spf13/viper"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 func DeployDocker(image, port, projectName, projectDir string) error {
-	fmt.Printf("Deploying Docker image: %s on port %s for project %s\n", image, port, projectName)
-	cmd := exec.Command("docker", "run", "-d", "--name", projectName, "-p", port+":"+port, image)
+
+	extPort, err := findFreePort(port)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Deploying Docker image: %s on free port %s for project %s\n", image, extPort, projectName)
+	cmd := exec.Command("docker", "run", "-d", "--name", projectName, "-p", extPort+":"+port, image)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return err
 	}
 	containerID := strings.TrimSpace(string(output))
-	pid, err := Serve(port)
+	pid, err := Serve(extPort)
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, port, "docker", image, strconv.Itoa(pid+1))
+	SaveProjectInfo(projectName, projectDir, containerID, extPort, port, "docker", image, pid)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,95 +64,6 @@ func DeployDocker(image, port, projectName, projectDir string) error {
 // 		}
 // 	}
 // }
-
-func SaveProjectInfo(name, dir, containerID, port, deployType, source, pid string) {
-	url, err := ExtractBoreURL("stdoutfile")
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// Create a map to hold the new project info
-	newProjectInfo := map[string]string{
-		"name":         name,
-		"container_id": containerID,
-		"port":         port,
-		"type":         deployType,
-		"source":       source,
-		"public_url":   url,
-		"pid":          pid,
-	}
-
-	// Set the file name and path
-	fileName := "projects_info.yaml"
-	filePath := filepath.Join(dir, fileName)
-
-	var projectInfos []map[string]string
-
-	// Checking if the file exists
-	if _, err := os.Stat(filePath); err == nil {
-		// Reading existing YAML file
-		existingData, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Printf("Error reading existing project info: %v\n", err)
-			return
-		}
-
-		// Unmarshaling existing YAML data into a slice of maps
-		err = yaml.Unmarshal(existingData, &projectInfos)
-		if err != nil {
-			fmt.Printf("Error unmarshaling existing project info: %v\n", err)
-			return
-		}
-	}
-
-	// Appending new project info to the slice
-	projectInfos = append(projectInfos, newProjectInfo)
-
-	// Marshaling updated slice into YAML
-	yamlData, err := yaml.Marshal(&projectInfos)
-	if err != nil {
-		fmt.Printf("Error marshaling config: %v\n", err)
-		return
-	}
-
-	// Writing updated YAML data to the file
-	err = os.WriteFile(filePath, yamlData, 0644)
-	if err != nil {
-		fmt.Printf("Error saving project info: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Project info saved successfully to %s\n", filePath)
-}
-
-func ExtractBoreURL(filename string) (string, error) {
-	// Open the file
-	file, err := os.Open(filename)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Create a regular expression to match the URL pattern
-	re := regexp.MustCompile(`https://[a-f0-9]+\.bore\.digital`)
-
-	// Scan the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Check if the line contains a matching URL
-		if match := re.FindString(line); match != "" {
-			return match, nil
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading file: %w", err)
-	}
-
-	// If no URL was found
-	return "", fmt.Errorf("no matching URL found in the file")
-}
 
 type PackageJSON struct {
 	Scripts map[string]string `json:"scripts"`
@@ -190,21 +109,147 @@ func DeployGitHub(repo, port, projectDir string) error {
 		return err
 	}
 
-	// 5. Run the Docker container
-	cmd = exec.Command("docker", "run", "-d", "--name", projectName, "-p", port+":"+appPort, projectName)
+	// 5. Check free port
+	extPort, err := findFreePort(port)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 6. Run the Docker container
+	cmd = exec.Command("docker", "run", "-d", "--name", projectName, "-p", extPort+":"+appPort, projectName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return err
 	}
 	containerID := strings.TrimSpace(string(output))
-	pid, err := Serve(port)
+	pid, err := Serve(extPort)
 	if err != nil {
 		log.Fatal(err)
 	}
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, port, "github", repo, strconv.Itoa(pid+1))
+	SaveProjectInfo(projectName, projectDir, containerID, extPort, port, "github", repo, pid)
 	fmt.Printf("Deployment successful. Container ID: %s\n", containerID)
 	return nil
+}
+
+func ExtractBoreURL(filename string) (string, error) {
+	// Open the file
+	file, err := os.Open(filename)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Create a regular expression to match the URL pattern
+	re := regexp.MustCompile(`https://[a-f0-9]+\.bore\.digital`)
+
+	// Scan the file line by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Check if the line contains a matching URL
+		if match := re.FindString(line); match != "" {
+			return match, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading file: %w", err)
+	}
+
+	// If no URL was found
+	return "", fmt.Errorf("no matching URL found in the file")
+}
+
+func SaveProjectInfo(name, dir, containerID, extPort, intPort, deployType, source, pid string) {
+	url, err := ExtractBoreURL("stdoutfile")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Create a map to hold the new project info
+	newProjectInfo := map[string]string{
+		"name":          name,
+		"container_id":  containerID,
+		"external_port": extPort,
+		"internal_port": intPort,
+		"type":          deployType,
+		"source":        source,
+		"public_url":    url,
+		"pid":           pid,
+	}
+
+	// Set the file name and path
+	fileName := "projects_info.yaml"
+	filePath := filepath.Join(dir, fileName)
+
+	var projectInfos []map[string]string
+
+	// Checking if the file exists
+	if _, err := os.Stat(filePath); err == nil {
+		// Reading existing YAML file
+		existingData, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Printf("Error reading existing project info: %v\n", err)
+			return
+		}
+
+		// Unmarshaling existing YAML data into a slice of maps
+		err = yaml.Unmarshal(existingData, &projectInfos)
+		if err != nil {
+			fmt.Printf("Error unmarshaling existing project info: %v\n", err)
+			return
+		}
+	}
+
+	// Appending new project info to the slice
+	projectInfos = append(projectInfos, newProjectInfo)
+
+	// Marshaling updated slice into YAML
+	yamlData, err := yaml.Marshal(&projectInfos)
+	if err != nil {
+		fmt.Printf("Error marshaling config: %v\n", err)
+		return
+	}
+
+	// Writing updated YAML data to the file
+	err = os.WriteFile(filePath, yamlData, 0644)
+	if err != nil {
+		fmt.Printf("Error saving project info: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Project info saved successfully to %s\n", filePath)
+}
+
+func findFreePort(initialPort string) (string, error) {
+	port, err := strconv.Atoi(initialPort)
+	if err != nil {
+		return "", fmt.Errorf("invalid port number: %v", err)
+	}
+
+	for {
+		address := fmt.Sprintf(":%d", port)
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			if isAddrInUse(err) {
+				port++
+				continue
+			}
+			return "", fmt.Errorf("error checking port: %v", err)
+		}
+		listener.Close()
+		return strconv.Itoa(port), nil
+	}
+}
+
+func isAddrInUse(err error) bool {
+	if opErr, ok := err.(*net.OpError); ok {
+		if syscallErr, ok := opErr.Err.(*os.SyscallError); ok {
+			return syscallErr.Err == syscall.EADDRINUSE
+		}
+	}
+	return false
 }
 
 func analyzeNodeApp(repoPath string) (appType string, port string, err error) {

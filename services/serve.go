@@ -2,6 +2,8 @@ package services
 
 import (
 	"bufio"
+	"bytes"
+	"strings"
 
 	// "bytes"
 	"fmt"
@@ -13,58 +15,28 @@ import (
 	"github.com/jkuri/bore/client"
 )
 
-func Serve(port string) (int, error) {
+func Serve(port string) (string, error) {
 	fmt.Println("Serving port", port)
-	boreCmd := fmt.Sprintf("bore -s bore.digital -p 2200 -ls localhost -lp %s > stdoutfile 2> stderrfile &", port)
+	boreCmd := fmt.Sprintf("bore -s bore.digital -p 2200 -ls localhost -lp %s > stdoutfile 2> stderrfile & echo $!", port)
 	cmd := exec.Command("sh", "-c", boreCmd)
 
-	// Create pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return -1, fmt.Errorf("error creating stdout pipe: %v", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return -1, fmt.Errorf("error creating stderr pipe: %v", err)
-	}
+	// Capture the command's output
+	var out bytes.Buffer
+	cmd.Stdout = &out
 
+	// Start the command
 	if err := cmd.Start(); err != nil {
-		return -1, fmt.Errorf("error starting command: %v", err)
+		return "", fmt.Errorf("error starting command: %v", err)
 	}
 
-	pid := cmd.Process.Pid
-
-	// Create a channel to signal when we're done reading logs
-	done := make(chan bool)
-
-	// Function to read from a pipe and print logs
-	logReader := func(reader io.Reader, prefix string) {
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			fmt.Printf("%s: %s\n", prefix, scanner.Text())
-		}
-	}
-
-	// Start goroutines to read stdout and stderr
-	go func() {
-		logReader(stdout, "STDOUT")
-		done <- true
-	}()
-	go func() {
-		logReader(stderr, "STDERR")
-		done <- true
-	}()
-
-	// Wait for both goroutines to finish
-	<-done
-	<-done
-
-	// Wait for the command to finish
+	// Wait for the command to complete
 	if err := cmd.Wait(); err != nil {
-		return -1, fmt.Errorf("command finished with error: %v", err)
+		return "", fmt.Errorf("command finished with error: %v", err)
 	}
 
-	return pid, nil
+	pid := out.String()
+
+	return strings.TrimSpace(pid), nil
 }
 
 func ReadOutput() {
