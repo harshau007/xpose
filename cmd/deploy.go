@@ -12,31 +12,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	Path, _  = os.Getwd()
+	PathName = filepath.Join(Path)
+)
+
 // deployCmd represents the deploy command
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName, _ := cmd.Flags().GetString("name")
 		dockerImage, _ := cmd.Flags().GetString("docker")
 		githubRepo, _ := cmd.Flags().GetString("github")
 		port, _ := cmd.Flags().GetString("port")
 
-		currPath, _ := os.Getwd()
-		pathName := filepath.Join(currPath)
 		var err error
 		if dockerImage != "" {
-			err = services.DeployDocker(dockerImage, port, projectName, pathName)
+			err = services.DeployDocker(dockerImage, port, projectName, PathName)
 		}
 
 		if githubRepo != "" {
-			err = services.DeployGitHub(githubRepo, port, pathName)
+			err = services.DeployGitHub(githubRepo, port, PathName)
 		}
 		if err != nil {
 			fmt.Println("Error: ", err)

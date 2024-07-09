@@ -16,13 +16,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	// "github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 )
 
-func DeployDocker(image, port, projectName, projectDir string) error {
+func FilePath(projectDir string) string {
+	fileName := "projects_info.yaml"
+	filePath := filepath.Join(projectDir, fileName)
+	return filePath
+}
 
+func DeployDocker(image, port, projectName, projectDir string) error {
 	extPort, err := findFreePort(port)
 	if err != nil {
 		log.Fatal(err)
@@ -34,36 +36,47 @@ func DeployDocker(image, port, projectName, projectDir string) error {
 	if err != nil {
 		return err
 	}
+
 	containerID := strings.TrimSpace(string(output))
-	pid, err := Serve(extPort)
+
+	pid, err := Serve(extPort, projectName)
+	if err != nil {
+		log.Fatal(err)
+	}
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, extPort, port, "docker", image, pid)
+
+	url, err := ExtractBoreURL("stdoutfile")
+	if err != nil {
+		fmt.Println(err)
+	}
+	transaction, err := NewTransaction(FilePath(projectDir))
+	if err != nil {
+		log.Fatalf("Error beginning transaction: %v", err)
+	}
+	defer transaction.rollback()
+
+	newEntity := Entry{
+		Name:         projectName,
+		ContainerID:  containerID,
+		ExternalPort: extPort,
+		InternalPort: port,
+		Type:         "docker",
+		Source:       image,
+		PublicURL:    url,
+		PID:          pid,
+	}
+	transaction.CreateEntry(newEntity)
+
+	if err := transaction.commit(); err != nil {
+		log.Fatalf("Error committing transaction: %v", err)
+	}
+
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Deployment successful. Container ID: %s\n", containerID)
 	return nil
 }
-
-// func SaveProjectInfo(name, dir, containerID, port, deployType, source string) {
-// 	url, err := ExtractBoreURL("stdoutfile")
-// 	if err != nil {
-// 		fmt.Println(err)
-// 	}
-// 	info := fmt.Sprintf("Name: %s\nContainer ID: %s\nPort: %s\nType: %s\nSource: %s\nPublic URL: %s\n",
-// 		name, containerID, port, deployType, source, url)
-// 	err = os.WriteFile(filepath.Join(dir, "project_info.txt"), []byte(info), 0644)
-// 	if err != nil {
-// 		fmt.Printf("Error saving project info: %v\n", err)
-// 	}
-// 	stdFiles := []string{"stdoutfile", "stderrfile"}
-// 	for _, file := range stdFiles {
-// 		err = os.Remove(file)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-// 	}
-// }
 
 type PackageJSON struct {
 	Scripts map[string]string `json:"scripts"`
@@ -122,12 +135,41 @@ func DeployGitHub(repo, port, projectDir string) error {
 		return err
 	}
 	containerID := strings.TrimSpace(string(output))
-	pid, err := Serve(extPort)
+
+	pid, err := Serve(extPort, projectName)
+
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	time.Sleep(5 * time.Second)
-	SaveProjectInfo(projectName, projectDir, containerID, extPort, port, "github", repo, pid)
+
+	url, err := ExtractBoreURL("stdoutfile")
+	if err != nil {
+		fmt.Println(err)
+	}
+	transaction, err := NewTransaction(FilePath(projectDir))
+	if err != nil {
+		log.Fatalf("Error beginning transaction: %v", err)
+	}
+	defer transaction.rollback()
+
+	newEntity := Entry{
+		Name:         projectName,
+		ContainerID:  containerID,
+		ExternalPort: extPort,
+		InternalPort: port,
+		Type:         "github",
+		Source:       repo,
+		PublicURL:    url,
+		PID:          pid,
+	}
+	transaction.CreateEntry(newEntity)
+
+	if err := transaction.commit(); err != nil {
+		log.Fatalf("Error committing transaction: %v", err)
+	}
+
 	fmt.Printf("Deployment successful. Container ID: %s\n", containerID)
 	return nil
 }
@@ -141,7 +183,7 @@ func ExtractBoreURL(filename string) (string, error) {
 	defer file.Close()
 
 	// Create a regular expression to match the URL pattern
-	re := regexp.MustCompile(`https://[a-f0-9]+\.bore\.digital`)
+	re := regexp.MustCompile(`https://[a-zA-Z0-9]+\.bore\.digital`)
 
 	// Scan the file line by line
 	scanner := bufio.NewScanner(file)
@@ -159,67 +201,6 @@ func ExtractBoreURL(filename string) (string, error) {
 
 	// If no URL was found
 	return "", fmt.Errorf("no matching URL found in the file")
-}
-
-func SaveProjectInfo(name, dir, containerID, extPort, intPort, deployType, source, pid string) {
-	url, err := ExtractBoreURL("stdoutfile")
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// Create a map to hold the new project info
-	newProjectInfo := map[string]string{
-		"name":          name,
-		"container_id":  containerID,
-		"external_port": extPort,
-		"internal_port": intPort,
-		"type":          deployType,
-		"source":        source,
-		"public_url":    url,
-		"pid":           pid,
-	}
-
-	// Set the file name and path
-	fileName := "projects_info.yaml"
-	filePath := filepath.Join(dir, fileName)
-
-	var projectInfos []map[string]string
-
-	// Checking if the file exists
-	if _, err := os.Stat(filePath); err == nil {
-		// Reading existing YAML file
-		existingData, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Printf("Error reading existing project info: %v\n", err)
-			return
-		}
-
-		// Unmarshaling existing YAML data into a slice of maps
-		err = yaml.Unmarshal(existingData, &projectInfos)
-		if err != nil {
-			fmt.Printf("Error unmarshaling existing project info: %v\n", err)
-			return
-		}
-	}
-
-	// Appending new project info to the slice
-	projectInfos = append(projectInfos, newProjectInfo)
-
-	// Marshaling updated slice into YAML
-	yamlData, err := yaml.Marshal(&projectInfos)
-	if err != nil {
-		fmt.Printf("Error marshaling config: %v\n", err)
-		return
-	}
-
-	// Writing updated YAML data to the file
-	err = os.WriteFile(filePath, yamlData, 0644)
-	if err != nil {
-		fmt.Printf("Error saving project info: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Project info saved successfully to %s\n", filePath)
 }
 
 func findFreePort(initialPort string) (string, error) {

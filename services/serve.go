@@ -15,9 +15,9 @@ import (
 	"github.com/jkuri/bore/client"
 )
 
-func Serve(port string) (string, error) {
+func Serve(port, project string) (string, error) {
 	fmt.Println("Serving port", port)
-	boreCmd := fmt.Sprintf("bore -s bore.digital -p 2200 -ls localhost -lp %s > stdoutfile 2> stderrfile & echo $!", port)
+	boreCmd := fmt.Sprintf("bore -s bore.digital -p 2200 -ls localhost -lp %s -id %s > stdoutfile 2> stderrfile & echo $!", port, project)
 	cmd := exec.Command("sh", "-c", boreCmd)
 
 	// Capture the command's output

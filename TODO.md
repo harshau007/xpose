@@ -1,5 +1,6 @@
 - [x] Add PID to YAML file (Used Workaround to get correct PID)
 - [x] Handle port conflicting (use external port with increment if already in use and internal port which user has given as input)
 - [x] List command
-- [ ] Add Deleting with also process kill of the bore command (shell eq: docker kill [cont_id] && docker rm [cont_id] && kill -9 [pid])
-- [ ] Use YAML file as DB
+- [x] Add Deleting with also process kill of the bore command (shell eq: docker kill [cont_id] && docker rm [cont_id] && kill -9 [pid])
+- [x] Use YAML file as DB
+- [ ] Add Bore Server for custom domain support
